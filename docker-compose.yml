@@ -1,0 +1,49 @@
+services:
+  controller:
+    container_name: controller
+    build:
+      context: .
+      dockerfile: ./cmd/controller/Dockerfile
+    ports:
+      - "8080:8080"
+    networks:
+      - temp
+    environment:
+      - DOCKER_NETWORK=temp
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    tty: true
+    stdin_open: true
+
+  loadbalancer:
+    container_name: loadbalancer
+    build:
+      context: .
+      dockerfile: ./cmd/loadbalancer/Dockerfile
+    ports:
+      - "9001:9001"
+    networks:
+      - temp
+    depends_on:
+      controller:
+        condition: service_started
+
+  node:
+    image: ct_hw3-node:latest
+    build:
+      context: .
+      dockerfile: ./cmd/node/Dockerfile
+    profiles:
+      - build_only
+  
+  client:
+    image: ct_hw3-client:latest
+    build:
+      context: .
+      dockerfile: ./cmd/client/Dockerfile
+    profiles:
+      - build_only
+
+networks:
+  temp:
+    driver: bridge
