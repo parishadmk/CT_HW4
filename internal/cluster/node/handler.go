@@ -2,15 +2,14 @@ package node
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
-	"net/url"
 	"strconv"
 
-	"github.com/Kafsh-e-Mardane-Varzeshi-Hypo-Test-Team/CT_HW3/internal/cluster/replica"
 	"github.com/gin-gonic/gin"
+	"github.com/parishadmk/CT_HW4/internal/cluster/controller"
+	"github.com/parishadmk/CT_HW4/internal/cluster/replica"
 )
 
 func (n *Node) setupRoutes() {
@@ -197,48 +196,21 @@ func (n *Node) getNodesContainingPartition(partitionId int) ([]string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), REQUEST_TIMEOUT)
 	defer cancel()
 
-	url := fmt.Sprintf("http://controller:8080/node-metadata/%d", partitionId)
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
-	if err != nil {
-		log.Printf("[node.getNodesContainingPartition] failed to connect to controller: %v", err)
+	var pm controller.PartitionMetadata
+	if err := n.etcdStore.GetJSON(ctx, fmt.Sprintf("/partitions/%d", partitionId), &pm); err != nil {
 		return nil, err
 	}
 
-	resp, err := n.httpClient.Do(req)
-	if err != nil {
-		log.Printf("[node.getNodesContainingPartition] failed to do http request: %v", err)
-		return nil, err
+	addresses := make([]string, 0, len(pm.Replicas))
+	for _, id := range pm.Replicas {
+		var nm controller.NodeMetadata
+		if err := n.etcdStore.GetJSON(ctx, fmt.Sprintf("/nodes/%d", id), &nm); err == nil {
+			addresses = append(addresses, nm.TcpAddress)
+		}
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		log.Printf("[node.getNodesContainingPartition] failed to do htpp request: %v", err)
-		return nil, fmt.Errorf("failed to fetch metadata: status %d", resp.StatusCode)
-	}
-
-	metadata := struct {
-		Addresses []string `json:"addresses"`
-	}{}
-	if err := json.NewDecoder(resp.Body).Decode(&metadata); err != nil {
-		log.Printf("[node.getNodesContainingPartition] failed to decode response: %v", err)
-		return nil, err
-	}
-
-	return metadata.Addresses, nil
+	return addresses, nil
 }
 
 func (n *Node) sendHeartbeat() error {
-	data := url.Values{"NodeID": {strconv.Itoa(n.Id)}}
-
-	resp, err := http.PostForm("http://controller:8080/node-heartbeat", data)
-	if err != nil {
-		return fmt.Errorf("[node.sendHeartbeat] failed to send heartbeat: %v", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("[node.sendHeartbeat] controller returned non-OK status: %v", resp.Status)
-	}
-
 	return nil
 }

@@ -1,5 +1,5 @@
-# CT_HW3
-Computer Technology Course - Homework 3
+# CT_HW4
+Computer Technology Course - Homework 4
 
 ---
 
@@ -34,6 +34,4 @@ docker compose up
 
 ## Contributors
 
-* [Mohammad Barkatin](https://github.com/mammedbrk)
-* [Mehdi Taheri](https://github.com/Mefi22)
-* [Parisa Sadat Mousavi](https://github.com/parisam83)
+* Parishad Mokhber

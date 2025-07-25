@@ -5,7 +5,7 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/Kafsh-e-Mardane-Varzeshi-Hypo-Test-Team/CT_HW3/internal/cluster/node"
+	"github.com/parishadmk/CT_HW4/internal/cluster/node"
 )
 
 func main() {

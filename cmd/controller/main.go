@@ -3,8 +3,8 @@ package main
 import (
 	"log"
 
-	"github.com/Kafsh-e-Mardane-Varzeshi-Hypo-Test-Team/CT_HW3/internal/cluster/controller"
-	"github.com/Kafsh-e-Mardane-Varzeshi-Hypo-Test-Team/CT_HW3/internal/cluster/controller/docker"
+	"github.com/parishadmk/CT_HW4/internal/cluster/controller"
+	"github.com/parishadmk/CT_HW4/internal/cluster/controller/docker"
 )
 
 func main() {
