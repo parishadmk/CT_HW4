@@ -55,11 +55,12 @@ services:
     # We remove the `profiles` key so it gets built automatically.
 
   client:
-    # The image for our command-line client
     image: ct_hw3-client:latest
     build:
       context: .
       dockerfile: ./cmd/client/Dockerfile
+    networks:
+      - temp
     # We also remove the `profiles` key here.
 
 networks:
