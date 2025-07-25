@@ -1,4 +1,4 @@
-FROM golang:alpine
+FROM --platform=linux/amd64 golang:alpine
 
 WORKDIR /app
 
@@ -7,8 +7,7 @@ COPY go.sum ./
 RUN go mod download
 
 COPY . .
-
-RUN go build -o cmd/node/main ./cmd/node/main.go
+RUN GOARCH=amd64 go build -o cmd/node/main ./cmd/node/main.go
 
 EXPOSE 8000
 EXPOSE 9000

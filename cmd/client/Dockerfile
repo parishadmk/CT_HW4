@@ -1,5 +1,5 @@
 # Build stage
-FROM golang:alpine AS builder
+FROM --platform=linux/amd64 golang:alpine AS builder
 
 WORKDIR /app
 
@@ -7,10 +7,10 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o client ./cmd/client/main.go
 
-RUN CGO_ENABLED=0 GOOS=linux go build -o client ./cmd/client/main.go
-
-FROM alpine:latest
+# Final stage
+FROM --platform=linux/amd64 alpine:latest
 
 WORKDIR /app
 
