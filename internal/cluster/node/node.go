@@ -1,16 +1,21 @@
 package node
 
 import (
+	"context"
 	"encoding/gob"
 	"fmt"
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
+	"github.com/Kafsh-e-Mardane-Varzeshi-Hypo-Test-Team/CT_HW3/internal/cluster/controller"
+	"github.com/Kafsh-e-Mardane-Varzeshi-Hypo-Test-Team/CT_HW3/internal/cluster/etcd"
 	"github.com/Kafsh-e-Mardane-Varzeshi-Hypo-Test-Team/CT_HW3/internal/cluster/replica"
 	"github.com/gin-gonic/gin"
+	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 const (
@@ -27,12 +32,24 @@ type Node struct {
 	replicasMapMutex sync.RWMutex
 	ginEngine        *gin.Engine
 	httpClient       *http.Client
+
+	etcdStore *etcd.Store
+	etcdLease clientv3.LeaseID
 }
 
 func NewNode(id int) *Node {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
 	router.Use(gin.Recovery())
+
+	endpoints := []string{"http://etcd:2379"}
+	if env := os.Getenv("ETCD_ENDPOINTS"); env != "" {
+		endpoints = []string{env}
+	}
+	store, err := etcd.NewStore(endpoints)
+	if err != nil {
+		log.Fatalf("failed to connect to etcd: %v", err)
+	}
 
 	return &Node{
 		Id:               id,
@@ -47,10 +64,12 @@ func NewNode(id int) *Node {
 				DisableCompression: false,
 			},
 		},
+		etcdStore: store,
 	}
 }
 
 func (n *Node) Start() {
+	n.registerWithEtcd()
 	go n.startHeartbeat(HEARTBEAT_TIMER)
 	go n.tcpListener(n.nodeConnectionHandler)
 
@@ -258,14 +277,36 @@ func (n *Node) replicateToFollower(address string, msg Message) error {
 
 func (n *Node) startHeartbeat(interval time.Duration) {
 	go func() {
+		ctx := context.Background()
 		for {
-			err := n.sendHeartbeat()
-			if err != nil {
-				log.Printf("[node.startHeartbeat] failed to send heartbeat: %v", err)
+			if err := n.etcdStore.KeepAliveLoop(ctx, n.etcdLease); err != nil {
+				log.Printf("[node.startHeartbeat] keepalive error: %v", err)
+				time.Sleep(interval)
+				n.registerWithEtcd()
+				continue
 			}
-			time.Sleep(interval)
+			return
 		}
 	}()
+}
+
+func (n *Node) registerWithEtcd() {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	meta := controller.NodeMetadata{
+		ID:          n.Id,
+		HttpAddress: "http://node-" + fmt.Sprint(n.Id) + ":8000",
+		TcpAddress:  "node-" + fmt.Sprint(n.Id) + ":9000",
+		Status:      controller.Alive,
+	}
+
+	lease, err := n.etcdStore.RegisterWithLease(ctx, fmt.Sprintf("/nodes/%d", n.Id), meta, 10)
+	if err != nil {
+		log.Printf("[node.registerWithEtcd] failed: %v", err)
+		return
+	}
+	n.etcdLease = lease
 }
 
 func (n *Node) sendSnapshotToNode(partitionId int, address string) error {

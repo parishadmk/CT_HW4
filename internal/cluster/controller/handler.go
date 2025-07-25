@@ -1,6 +1,8 @@
 package controller
 
 import (
+	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
@@ -27,20 +29,32 @@ func (c *Controller) Run(addr string) error {
 }
 
 func (c *Controller) handleGetMetadata(ctx *gin.Context) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	ctx2, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	nodes, err := c.etcdStore.ListJSON(ctx2, "/nodes/", func() interface{} { return &NodeMetadata{} })
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	parts, err := c.etcdStore.ListJSON(ctx2, "/partitions/", func() interface{} { return &PartitionMetadata{} })
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
 
 	metadata := struct {
 		NodeAddresses map[int]string       `json:"nodes"`
 		Partitions    []*PartitionMetadata `json:"partitions"`
-	}{}
-	metadata.NodeAddresses = make(map[int]string)
-	for id, node := range c.nodes {
-		if node.Status == Alive {
-			metadata.NodeAddresses[id] = node.HttpAddress
-		}
+	}{NodeAddresses: make(map[int]string), Partitions: make([]*PartitionMetadata, len(parts))}
+
+	for _, nraw := range nodes {
+		nm := nraw.(*NodeMetadata)
+		metadata.NodeAddresses[nm.ID] = nm.HttpAddress
 	}
-	metadata.Partitions = c.partitions
+	for i, praw := range parts {
+		metadata.Partitions[i] = praw.(*PartitionMetadata)
+	}
 
 	ctx.JSON(http.StatusOK, metadata)
 }
@@ -52,19 +66,23 @@ func (c *Controller) handleGetNodeMetadata(ctx *gin.Context) {
 		return
 	}
 
-	metadata := struct {
-		Addresses []string `json:"addresses"`
-	}{}
-	c.mu.Lock()
-	metadata.Addresses = make([]string, len(c.partitions[partitionID].Replicas))
-	for i, replica := range c.partitions[partitionID].Replicas {
-		if c.nodes[replica].Status == Alive {
-			metadata.Addresses[i] = c.nodes[replica].TcpAddress
+	ctx2, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	var part PartitionMetadata
+	if err := c.etcdStore.GetJSON(ctx2, fmt.Sprintf("/partitions/%d", partitionID), &part); err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	addresses := make([]string, 0, len(part.Replicas))
+	for _, id := range part.Replicas {
+		var nm NodeMetadata
+		if err := c.etcdStore.GetJSON(ctx2, fmt.Sprintf("/nodes/%d", id), &nm); err == nil {
+			addresses = append(addresses, nm.TcpAddress)
 		}
 	}
-	c.mu.Unlock()
-
-	ctx.JSON(http.StatusOK, metadata)
+	ctx.JSON(http.StatusOK, gin.H{"addresses": addresses})
 }
 
 func (c *Controller) handleHeartbeat(ctx *gin.Context) {

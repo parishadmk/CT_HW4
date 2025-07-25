@@ -3,16 +3,17 @@ package loadbalancer
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
 	"math/rand"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
 	"github.com/Kafsh-e-Mardane-Varzeshi-Hypo-Test-Team/CT_HW3/internal/cluster/controller"
+	"github.com/Kafsh-e-Mardane-Varzeshi-Hypo-Test-Team/CT_HW3/internal/cluster/etcd"
 	"github.com/gin-gonic/gin"
 )
 
@@ -20,6 +21,7 @@ type LoadBalancer struct {
 	controllerAddr   string
 	httpClient       *http.Client
 	ginEngine        *gin.Engine
+	etcdStore        *etcd.Store
 	metadataLock     sync.RWMutex
 	metadataExpiry   time.Time
 	refreshInterval  time.Duration
@@ -33,6 +35,15 @@ func NewLoadBalancer(controllerAddr string) *LoadBalancer {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
 	router.Use(gin.Recovery())
+
+	endpoints := []string{"http://etcd:2379"}
+	if env := os.Getenv("ETCD_ENDPOINTS"); env != "" {
+		endpoints = []string{env}
+	}
+	store, err := etcd.NewStore(endpoints)
+	if err != nil {
+		log.Fatalf("failed to connect to etcd: %v", err)
+	}
 
 	lb := &LoadBalancer{
 		controllerAddr: controllerAddr,
@@ -48,6 +59,7 @@ func NewLoadBalancer(controllerAddr string) *LoadBalancer {
 		refreshInterval: 10 * time.Second,
 		requestTimeout:  2 * time.Second,
 		maxRetries:      3,
+		etcdStore:       store,
 	}
 
 	lb.setupRoutes()
@@ -105,28 +117,26 @@ func (lb *LoadBalancer) refreshMetadata() error {
 	ctx, cancel := context.WithTimeout(context.Background(), lb.requestTimeout)
 	defer cancel()
 
-	url := fmt.Sprintf("%s/metadata", lb.controllerAddr)
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	nodes, err := lb.etcdStore.ListJSON(ctx, "/nodes/", func() interface{} { return &controller.NodeMetadata{} })
 	if err != nil {
 		return err
 	}
-
-	resp, err := lb.httpClient.Do(req)
+	partitions, err := lb.etcdStore.ListJSON(ctx, "/partitions/", func() interface{} { return &controller.PartitionMetadata{} })
 	if err != nil {
 		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to fetch metadata: status %d", resp.StatusCode)
 	}
 
 	metadata := struct {
-		NodeAddresses map[int]string                  `json:"nodes"`
-		Partitions    []*controller.PartitionMetadata `json:"partitions"`
-	}{}
-	if err := json.NewDecoder(resp.Body).Decode(&metadata); err != nil {
-		return err
+		NodeAddresses map[int]string
+		Partitions    []*controller.PartitionMetadata
+	}{NodeAddresses: make(map[int]string), Partitions: make([]*controller.PartitionMetadata, len(partitions))}
+
+	for _, nraw := range nodes {
+		nm := nraw.(*controller.NodeMetadata)
+		metadata.NodeAddresses[nm.ID] = nm.HttpAddress
+	}
+	for i, praw := range partitions {
+		metadata.Partitions[i] = praw.(*controller.PartitionMetadata)
 	}
 
 	lb.metadataLock.Lock()

@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
 	"github.com/Kafsh-e-Mardane-Varzeshi-Hypo-Test-Team/CT_HW3/internal/cluster/controller/docker"
+	"github.com/Kafsh-e-Mardane-Varzeshi-Hypo-Test-Team/CT_HW3/internal/cluster/etcd"
 	"github.com/docker/go-connections/nat"
 	"github.com/gin-gonic/gin"
 )
@@ -25,12 +27,22 @@ type Controller struct {
 	httpClient        *http.Client
 	networkName       string
 	nodeImage         string
+	etcdStore         *etcd.Store
 }
 
 func NewController(dockerClient *docker.DockerClient, partitionCount, replicationFactor int, networkName, nodeImage string) *Controller {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
 	router.Use(gin.Recovery())
+
+	endpoints := []string{"http://etcd:2379"}
+	if env := os.Getenv("ETCD_ENDPOINTS"); env != "" {
+		endpoints = []string{env}
+	}
+	store, err := etcd.NewStore(endpoints)
+	if err != nil {
+		log.Fatalf("failed to connect to etcd: %v", err)
+	}
 
 	c := &Controller{
 		dockerClient:      dockerClient,
@@ -49,6 +61,7 @@ func NewController(dockerClient *docker.DockerClient, partitionCount, replicatio
 		},
 		networkName: networkName,
 		nodeImage:   nodeImage,
+		etcdStore:   store,
 	}
 
 	for i := range partitionCount {
@@ -57,6 +70,10 @@ func NewController(dockerClient *docker.DockerClient, partitionCount, replicatio
 			Leader:      -1, // Will be set when first node joins
 			Replicas:    make([]int, 0),
 		}
+		// persist partition metadata in etcd
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_ = c.etcdStore.PutJSON(ctx, fmt.Sprintf("/partitions/%d", i), c.partitions[i])
+		cancel()
 	}
 
 	c.setupRoutes()
@@ -102,6 +119,10 @@ func (c *Controller) RegisterNode(nodeID int) error {
 	node.HttpAddress = fmt.Sprintf("http://node-%d:%s", nodeID, httpPort)
 	node.Status = Syncing
 	c.mu.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	_ = c.etcdStore.PutJSON(ctx, fmt.Sprintf("/nodes/%d", nodeID), node)
+	cancel()
 
 	go c.makeNodeReady(nodeID)
 
@@ -162,6 +183,10 @@ func (c *Controller) makeNodeReady(nodeID int) {
 	c.mu.Lock()
 	c.nodes[nodeID].Status = Alive
 	c.mu.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	_ = c.etcdStore.PutJSON(ctx, fmt.Sprintf("/nodes/%d", nodeID), c.nodes[nodeID])
+	cancel()
 	log.Printf("controller::makeNodeReady: Node %d is now ready\n", nodeID)
 }
 
@@ -179,6 +204,9 @@ func (c *Controller) replicatePartitions(partitionsToAssign []int, nodeID int) {
 				}
 				c.nodes[nodeID].partitions = append(c.nodes[nodeID].partitions, partitionID)
 				c.mu.Unlock()
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				_ = c.etcdStore.PutJSON(ctx, fmt.Sprintf("/partitions/%d", partitionID), partition)
+				cancel()
 				log.Printf("controller::makeNodeReady: replicate successfully partition %d to node %d\n", partitionID, nodeID)
 				break
 			} else {
