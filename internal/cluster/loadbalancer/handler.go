@@ -152,7 +152,13 @@ func (lb *LoadBalancer) doNodeRequest(method, nodeAddr, partitionID, key, value 
 	ctx, cancel := context.WithTimeout(context.Background(), lb.requestTimeout)
 	defer cancel()
 
-	url := fmt.Sprintf("%s/%s/%s/%s", nodeAddr, partitionID, key, value)
+	// Carefully build the path to avoid extra slashes
+	path := fmt.Sprintf("%s/%s", partitionID, key)
+	if value != "" {
+		path = fmt.Sprintf("%s/%s", path, value)
+	}
+	url := fmt.Sprintf("%s/%s", nodeAddr, path)
+
 	req, err := http.NewRequestWithContext(ctx, method, url, nil)
 	if err != nil {
 		return nil, err

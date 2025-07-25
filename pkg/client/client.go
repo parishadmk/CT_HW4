@@ -42,7 +42,8 @@ func (c *Client) Set(key, value string) error {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("set failed: %s", resp.Status)
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("set failed: %s - %s", resp.Status, string(body))
 	}
 	return nil
 }
@@ -57,7 +58,8 @@ func (c *Client) Get(key string) (string, error) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("get failed: %s", resp.Status)
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("get failed: %s - %s", resp.Status, string(body))
 	}
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -80,7 +82,26 @@ func (c *Client) Delete(key string) error {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("delete failed: %s", resp.Status)
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("delete failed: %s - %s", resp.Status, string(body))
+	}
+	return nil
+}
+
+// AddNode sends a request to a controller to add a new node.
+func (c *Client) AddNode(nodeID string) error {
+	// Management tasks should go to a controller, not the load balancer.
+	controllerURL := "http://controller:8080/node/add"
+
+	// Correctly initialize url.Values and send the PostForm request.
+	resp, err := c.http.PostForm(controllerURL, url.Values{"NodeID": {nodeID}})
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("add node failed: %s - %s", resp.Status, string(body))
 	}
 	return nil
 }

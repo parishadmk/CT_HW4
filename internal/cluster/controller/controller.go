@@ -153,8 +153,11 @@ func (c *Controller) removeNode(nodeID int) error {
 }
 
 func (c *Controller) Start(addr string) error {
-	if err := c.RegisterNode(1); err != nil {
-		log.Fatalf("Failed to create initial node: %v", err)
+	// Only the primary controller should create the initial node
+	if os.Getenv("PRIMARY_CONTROLLER") == "true" {
+		if err := c.RegisterNode(1); err != nil {
+			log.Fatalf("Failed to create initial node: %v", err)
+		}
 	}
 
 	go c.monitorHeartbeat()
@@ -281,13 +284,13 @@ func (c *Controller) handleFailover(nodeID int) {
 	}
 
 	for _, partitionID := range node.partitions {
-		if c.partitions[partitionID].Leader == nodeID {
-			// set another node as leader
-			if len(c.partitions[partitionID].Replicas) > 0 {
-				newLeader := c.partitions[partitionID].Replicas[0]
-				c.partitions[partitionID].Leader = newLeader
+		partition := c.partitions[partitionID]
+		if partition.Leader == nodeID {
+			if len(partition.Replicas) > 0 {
+				newLeader := partition.Replicas[0]
+				partition.Leader = newLeader
 				log.Printf("controller::handleFailover: Node %d is now the leader for partition %d\n", newLeader, partitionID)
-				// notify the new leader to take over
+
 				addr := fmt.Sprintf("%s/set-leader/%d", c.nodes[newLeader].HttpAddress, partitionID)
 				resp, err := c.doNodeRequest("POST", addr)
 				if err != nil {
@@ -295,19 +298,30 @@ func (c *Controller) handleFailover(nodeID int) {
 					continue
 				}
 				defer resp.Body.Close()
+
 				if resp.StatusCode != http.StatusOK {
 					log.Printf("controller::handleFailover: Failed to set new leader for partition %d: %s\n", partitionID, resp.Status)
 				} else {
 					log.Printf("controller::handleFailover: New leader for partition %d is node %d\n", partitionID, newLeader)
-					// remove replica[0]
-					c.partitions[partitionID].Replicas = c.partitions[partitionID].Replicas[1:]
+					partition.Replicas = partition.Replicas[1:]
 				}
+
+				// *** FIX: Persist the partition change to etcd ***
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				c.etcdStore.PutJSON(ctx, fmt.Sprintf("/partitions/%d", partitionID), partition)
+				cancel()
+
 			}
 		} else {
 			// remove this node from replicas
-			for i, replica := range c.partitions[partitionID].Replicas {
+			for i, replica := range partition.Replicas {
 				if replica == nodeID {
-					c.partitions[partitionID].Replicas = append(c.partitions[partitionID].Replicas[:i], c.partitions[partitionID].Replicas[i+1:]...)
+					partition.Replicas = append(partition.Replicas[:i], partition.Replicas[i+1:]...)
+
+					// *** FIX: Persist the partition change to etcd ***
+					ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+					c.etcdStore.PutJSON(ctx, fmt.Sprintf("/partitions/%d", partitionID), partition)
+					cancel()
 					break
 				}
 			}

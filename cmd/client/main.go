@@ -10,6 +10,29 @@ import (
 
 var baseURL string
 
+func addNodeCmd() *cobra.Command {
+	var nodeID string
+	cmd := &cobra.Command{
+		Use:   "add-node",
+		Short: "Add a new node to the cluster",
+		Run: func(cmd *cobra.Command, args []string) {
+			if nodeID == "" {
+				cmd.Help()
+				os.Exit(1)
+			}
+			c := newClient()
+			if err := c.AddNode(nodeID); err != nil {
+				fmt.Println("Add node failed:", err)
+				os.Exit(1)
+			}
+			fmt.Printf("Request to add node %s sent successfully.\n", nodeID)
+		},
+	}
+	cmd.Flags().StringVar(&nodeID, "id", "", "ID of the node to add")
+	cmd.MarkFlagRequired("id")
+	return cmd
+}
+
 func main() {
 	rootCmd := &cobra.Command{
 		Use:   "clientcli",
@@ -31,6 +54,7 @@ func main() {
 		setCmd(),
 		getCmd(),
 		deleteCmd(),
+		addNodeCmd(),
 	)
 
 	if err := rootCmd.Execute(); err != nil {
