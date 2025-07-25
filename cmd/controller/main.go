@@ -12,7 +12,7 @@ func main() {
 	if err != nil {
 		panic("Failed to create Docker client")
 	}
-	controller := controller.NewController(dockerClient, 3, 2, "ct_hw3_temp", "ct_hw3-node:latest")
+	controller := controller.NewController(dockerClient, 3, 2, "ct_network", "ct_hw3-node:latest")
 	if err := controller.Start(":8080"); err != nil {
 		log.Fatalf("Failed to start controller: %v", err)
 	}
