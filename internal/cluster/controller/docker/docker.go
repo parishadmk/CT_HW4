@@ -39,6 +39,7 @@ func (d *DockerClient) CreateNodeContainer(imageName string, nodeID int, network
 		},
 		Env: []string{
 			"NODE-ID=" + strconv.Itoa(nodeID),
+			"CONTROLLER_ADDR=controller:8080",
 		},
 	}, &container.HostConfig{
 		NetworkMode: container.NetworkMode(networkName),

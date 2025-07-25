@@ -8,12 +8,13 @@ services:
       - "8080:8080"
     networks:
       - temp
-    environment:
-      - DOCKER_NETWORK=temp
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     tty: true
     stdin_open: true
+    # Make sure the controller waits for the node image to be built
+    depends_on:
+      - node
 
   loadbalancer:
     container_name: loadbalancer
@@ -25,11 +26,11 @@ services:
     networks:
       - temp
     depends_on:
-      controller:
-        condition: service_started
-  
+      - controller
+
   etcd:
     image: quay.io/coreos/etcd:v3.5.12
+    container_name: etcd-1
     command:
       - etcd
       - --name=etcd-1
@@ -43,22 +44,23 @@ services:
     networks:
       - temp
 
-
   node:
+    # The image name used by the controller
     image: ct_hw3-node:latest
     build:
       context: .
       dockerfile: ./cmd/node/Dockerfile
-    profiles:
-      - build_only
-  
+    # This service doesn't need to run on its own,
+    # it just needs to be built. The controller will start node containers.
+    # We remove the `profiles` key so it gets built automatically.
+
   client:
+    # The image for our command-line client
     image: ct_hw3-client:latest
     build:
       context: .
       dockerfile: ./cmd/client/Dockerfile
-    profiles:
-      - build_only
+    # We also remove the `profiles` key here.
 
 networks:
   temp:

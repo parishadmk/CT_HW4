@@ -7,7 +7,10 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -26,8 +29,9 @@ const (
 )
 
 type Node struct {
-	Id       int
-	replicas map[int]*replica.Replica // partitionId, replica of that partiotionId
+	Id             int
+	replicas       map[int]*replica.Replica // partitionId, replica of that partiotionId
+	controllerAddr string
 
 	replicasMapMutex sync.RWMutex
 	ginEngine        *gin.Engine
@@ -37,7 +41,7 @@ type Node struct {
 	etcdLease clientv3.LeaseID
 }
 
-func NewNode(id int) *Node {
+func NewNode(id int, controllerAddr string) *Node {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
 	router.Use(gin.Recovery())
@@ -54,6 +58,7 @@ func NewNode(id int) *Node {
 	return &Node{
 		Id:               id,
 		replicas:         make(map[int]*replica.Replica),
+		controllerAddr:   controllerAddr, // Store the address
 		replicasMapMutex: sync.RWMutex{},
 		ginEngine:        router,
 		httpClient: &http.Client{
@@ -275,17 +280,41 @@ func (n *Node) replicateToFollower(address string, msg Message) error {
 	return fmt.Errorf("failed to replicate to follower at %s after %d retries", address, maxRetries)
 }
 
+func (n *Node) sendHeartbeat() {
+	addr := fmt.Sprintf("http://%s/node-heartbeat", n.controllerAddr)
+	data := url.Values{}
+	data.Set("NodeID", strconv.Itoa(n.Id))
+
+	// Use a dedicated client for heartbeats to not interfere with other requests
+	hbClient := &http.Client{Timeout: 2 * time.Second}
+
+	_, err := hbClient.Post(addr, "application/x-www-form-urlencoded", strings.NewReader(data.Encode()))
+	if err != nil {
+		log.Printf("[node.sendHeartbeat] failed to send heartbeat to controller: %v", err)
+	}
+}
+
 func (n *Node) startHeartbeat(interval time.Duration) {
+	// This goroutine will handle the etcd lease
 	go func() {
 		ctx := context.Background()
 		for {
 			if err := n.etcdStore.KeepAliveLoop(ctx, n.etcdLease); err != nil {
 				log.Printf("[node.startHeartbeat] keepalive error: %v", err)
 				time.Sleep(interval)
-				n.registerWithEtcd()
+				n.registerWithEtcd() // Re-register if lease is lost
 				continue
 			}
 			return
+		}
+	}()
+
+	// This new goroutine will send heartbeats to the controller
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for range ticker.C {
+			n.sendHeartbeat()
 		}
 	}()
 }

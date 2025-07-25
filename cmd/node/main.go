@@ -19,7 +19,14 @@ func main() {
 		log.Fatalf("[main (node)] failed to get 'NODE-ID' env variable: %v", err)
 	}
 
-	n := node.NewNode(id)
+	// Read the new environment variable
+	controllerAddr := os.Getenv("CONTROLLER_ADDR")
+	if controllerAddr == "" {
+		log.Fatalf("[main (node)] CONTROLLER_ADDR env variable not set")
+	}
+
+	// This is the corrected line that passes BOTH arguments
+	n := node.NewNode(id, controllerAddr)
 	n.Start()
 }
 

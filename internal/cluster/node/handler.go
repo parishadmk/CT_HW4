@@ -210,7 +210,3 @@ func (n *Node) getNodesContainingPartition(partitionId int) ([]string, error) {
 	}
 	return addresses, nil
 }
-
-func (n *Node) sendHeartbeat() error {
-	return nil
-}
