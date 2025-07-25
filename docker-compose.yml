@@ -7,7 +7,9 @@ services:
     ports:
       - "8080:8080"
     networks:
-      - temp
+      temp:
+        aliases:
+          - controller
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     tty: true
@@ -22,7 +24,9 @@ services:
     ports:
       - "8081:8080"
     networks:
-      - temp
+      temp:
+        aliases:
+          - controller
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     tty: true

@@ -92,11 +92,30 @@ func (c *Controller) handleHeartbeat(ctx *gin.Context) {
 	}
 
 	c.mu.Lock()
-	if c.nodes[nodeID].Status == Dead {
+	node, ok := c.nodes[nodeID]
+	c.mu.Unlock()
+	if !ok {
+		ctx2, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		var nm NodeMetadata
+		if err := c.etcdStore.GetJSON(ctx2, fmt.Sprintf("/nodes/%d", nodeID), &nm); err == nil {
+			c.mu.Lock()
+			c.nodes[nodeID] = &nm
+			node = &nm
+			c.mu.Unlock()
+		} else {
+			cancel()
+			ctx.Status(http.StatusNotFound)
+			return
+		}
+		cancel()
+	}
+
+	c.mu.Lock()
+	if node.Status == Dead {
 		log.Printf("controller::handleHeartbeat: Node %d revived\n", nodeID)
 		go c.reviveNode(nodeID)
 	}
-	c.nodes[nodeID].lastSeen = time.Now()
+	node.lastSeen = time.Now()
 	c.mu.Unlock()
 	ctx.Status(http.StatusOK)
 }
